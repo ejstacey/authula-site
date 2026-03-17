@@ -18,6 +18,28 @@ The plugin uses a hierarchical model: Users → Roles → Permissions, allowing 
 
 ---
 
+## Configuration
+
+### Standalone Mode
+
+```toml
+[plugins.access_control]
+enabled = true
+```
+
+### Library Mode
+
+```go
+accesscontrolplugin "github.com/GoBetterAuth/go-better-auth/v2/plugins/access-control"
+accesscontrolplugintypes "github.com/GoBetterAuth/go-better-auth/v2/plugins/access-control/types"
+
+accesscontrolplugin.New(accesscontrolplugintypes.AccessControlPluginConfig{
+  Enabled: true,
+})
+```
+
+---
+
 ## Database Schema
 
 ### access_control_roles Table
