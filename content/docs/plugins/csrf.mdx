@@ -1,40 +1,25 @@
 ---
 title: CSRF Plugin
+description: Server-side protection against Cross-Site Request Forgery attacks using the Double-Submit Cookie pattern
 ---
 
-The CSRF plugin provides server-side protection against Cross-Site Request Forgery attacks using the Double-Submit Cookie pattern integrated into Authula's lifecycle hook system.
+## Overview
 
-## Core Functionality
+The CSRF plugin provides server-side protection against Cross-Site Request Forgery (CSRF) attacks using the **Double-Submit Cookie pattern** integrated into Authula's lifecycle hook system. It automatically generates cryptographically secure tokens for safe HTTP methods and validates them on state-changing requests.
 
-### Token Generation
+### Features
 
-On safe HTTP methods (GET, HEAD, OPTIONS), the plugin automatically generates a cryptographically secure token and sets it as a cookie. The cookie is intentionally readable by JavaScript to enable the Double-Submit pattern.
+- **Double-Submit Cookie Pattern** — Validates CSRF tokens in both cookies and request headers
+- **Automatic Token Generation** — Generates secure tokens on safe HTTP methods (GET, HEAD, OPTIONS)
+- **Selective Enforcement** — Only validates on routes that explicitly request protection
+- **Token Cleanup** — Automatically clears CSRF cookies on sign-out
+- **Optional Header Protection** — Supports Go 1.25's CrossOriginProtection for additional security
 
-### Token Validation
+---
 
-On state-changing methods (POST, PUT, PATCH, DELETE), the plugin validates that the CSRF token exists in both a cookie and a request header, and that both values match exactly. Requests with missing or mismatched tokens are rejected with a 403 response.
+## Configuration
 
-### Token Cleanup
-
-When users sign out, the plugin automatically clears the CSRF cookie.
-
-## Integration Architecture
-
-The plugin integrates with Authula through the **lifecycle hook system**, registering handlers at specific stages:
-
-- **Before Hook (Order 5)**: Token generation for safe methods
-- **Before Hook (Order 15)**: Token validation for unsafe methods (requires explicit opt-in via route metadata)
-- **After Hook (Order 15)**: Cookie cleanup on sign-out
-
-Routes must explicitly request CSRF protection by including the plugin identifier in their metadata. This allows selective protection—authentication endpoints like sign-in can skip validation while authenticated endpoints enforce it.
-
-## Optional Layered Protection
-
-Beyond the Double-Submit pattern, the plugin optionally supports **header-based origin validation** using Go 1.25's CrossOriginProtection. When enabled, this validates Sec-Fetch-Site, Origin, and Host headers against configured trusted origins before token validation occurs.
-
-## Standalone Mode
-
-Configure the CSRF plugin in your TOML configuration file:
+### Standalone Mode
 
 ```toml
 [plugins.csrf]
@@ -45,6 +30,24 @@ max_age = "24h"
 secure = true
 same_site = "lax"
 enable_header_protection = false
+```
+
+### Library Mode
+
+```go
+import (
+	csrfplugin "github.com/Authula/authula/plugins/csrf"
+)
+
+csrfplugin.New(csrfplugin.CSRFPluginConfig{
+	Enabled:                true,
+	CookieName:             "authula_csrf_token",
+	HeaderName:             "X-AUTHULA-CSRF-TOKEN",
+	MaxAge:                 24 * time.Hour,
+	Secure:                 false,
+	SameSite:               "lax",
+	EnableHeaderProtection: false,
+}),
 ```
 
 ### Configuration Options
@@ -59,25 +62,76 @@ enable_header_protection = false
 | `same_site`                | string   | `"lax"`                  | SameSite attribute: `lax`, `strict`, or `none` |
 | `enable_header_protection` | boolean  | `false`                  | Enable Go's CrossOriginProtection              |
 
-## Library Mode
+---
 
-To use the plugin programmatically, instantiate it as part of the plugins array when creating a new Authula instance:
+## API Reference
 
-```go
-csrfplugin.New(csrfplugin.CSRFPluginConfig{
-  Enabled:  true,
-  CookieName: "authula_csrf_token",
-  HeaderName: "X-AUTHULA-CSRF-TOKEN",
-  MaxAge: time.Hour * 24,
-  Secure:   false,
-  SameSite: "lax",
-  EnableHeaderProtection: false,
-})
+The CSRF plugin does not expose any HTTP endpoints. It operates as a middleware plugin that validates incoming requests via lifecycle hooks.
+
+---
+
+## Database Schema
+
+The CSRF plugin does not create any database tables. Token validation is performed statelessly using cookies and headers.
+
+---
+
+## Plugin Capabilities
+
+The CSRF plugin integrates with Authula through the **lifecycle hook system**, registering hooks at specific stages:
+
+- **Before Hook (Order 5)** — Token generation for safe methods (GET, HEAD, OPTIONS)
+- **Before Hook (Order 5)** — Token validation for unsafe methods (POST, PUT, PATCH, DELETE) — requires explicit opt-in via route metadata
+- **After Hook (Order 5)** — Cookie cleanup on sign-out
+
+It also has the following capabilities:
+
+- `csrf.protect` — Validates the presence and correctness of CSRF tokens on protected routes
+
+### Token Generation Flow
+
+On safe HTTP methods, the plugin automatically generates a cryptographically secure token and sets it as a cookie. The cookie is intentionally readable by JavaScript (`HttpOnly=false`) to enable the Double-Submit pattern.
+
+### Token Validation Flow
+
+On state-changing methods, the plugin validates that the CSRF token exists in both:
+
+1. A cookie (readable by JavaScript)
+2. A request header
+
+Both values must match exactly. Requests with missing or mismatched tokens are rejected with a `403 Forbidden` response.
+
+### Optional Layered Protection
+
+Beyond the Double-Submit pattern, the plugin optionally supports **header-based origin validation** using Go 1.25's `CrossOriginProtection`. When enabled via `enable_header_protection`, this validates `Sec-Fetch-Site`, `Origin`, and `Host` headers against configured trusted origins before token validation occurs.
+
+### How to Use
+
+Routes must explicitly request CSRF protection by including the plugin identifier in their metadata. This allows selective protection—authentication endpoints like sign-in can skip validation while authenticated endpoints enforce it.
+
+```toml
+[[route_mappings]]
+method = "POST"
+path = "/some/path"
+plugins = ["csrf.protect"]
 ```
+
+---
 
 ## Key Design Decisions
 
-- **HttpOnly=false**: Required for Double-Submit pattern where JavaScript must read the cookie value
-- **Selective enforcement**: Only validates on routes that explicitly request protection
-- **Defense in depth**: Optional header protection provides additional layer beyond tokens
-- **Hot reloadable**: Configuration changes apply without server restart
+- **HttpOnly=false** — Required for Double-Submit pattern where JavaScript must read the cookie value
+- **Selective enforcement** — Only validates on routes that explicitly request protection
+- **Defense in depth** — Optional header protection provides additional layer beyond tokens
+- **Hot reloadable** — Configuration changes apply without server restart
+
+---
+
+## Security Recommendations
+
+- **Enable Secure Flag in Production** — Set `secure = true` to ensure cookies are only transmitted over HTTPS
+- **Strict SameSite** — Set `same_site = "strict"` for maximum CSRF protection if you need it (may impact UX). But you may want to keep it at `lax` to still allow some cross-site requests especially for top-level navigations.
+- **Enable Header Protection** — Consider enabling `enable_header_protection = true` for additional origin validation
+- **Trusted Origins** — When using header protection, configure trusted origins appropriately for your deployment
+- **Token Rotation** — The 24-hour default `max_age` provides a balance between security and UX; adjust based on your security requirements
+- **HttpOnly Trade-off** — The Double-Submit pattern requires `HttpOnly=false`, making tokens accessible to JavaScript; ensure your application is protected against XSS attacks
